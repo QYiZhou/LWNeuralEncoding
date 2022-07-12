@@ -1,8 +1,15 @@
-# model loading, image transform, feature extraction of different models
+'''
+Author: zhouqy
+Date: 2022-06-04 11:40:49
+LastEditors: zhouqy
+LastEditTime: 2022-07-11 23:43:09
+Description: Model loading, image transform, feature extraction of different models
+'''
 import os
 import torch
 import urllib
 from torchvision import transforms as trn
+
 
 import timm
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD,IMAGENET_INCEPTION_MEAN,IMAGENET_INCEPTION_STD
@@ -16,12 +23,11 @@ from alexnet import *
 def load_alexnet(model_checkpoints):
     """This function initializes an Alexnet and load
     its weights from a pretrained model
-    ----------
-    model_checkpoints : str
-        model checkpoints location.
 
-    Returns
-    -------
+    Args:
+    model_checkpoints (str): model checkpoints location.
+
+    Returns:
     model
         pytorch model of alexnet
     """
@@ -43,6 +49,16 @@ def load_alexnet(model_checkpoints):
 
 
 def load_model(model_name):
+    """This function specifies the model name and load
+    its weights from a pretrained model
+
+    Args:
+    model_name (str): model name used to extract feature.
+
+    Returns:
+    model
+        model with pretrained model weights
+    """
 
     if model_name == 'alexnet':
         # load Alexnet
@@ -59,7 +75,15 @@ def load_model(model_name):
     return model
 
 
-def image_transform(model_name, model=None):
+def image_transform(model_name):
+    """_summary_
+
+    Args:
+        model_name (str): model name used to extract feature.
+
+    Returns:
+        transform
+    """
 
     if model_name == 'alexnet':
         img_mean = IMAGENET_DEFAULT_MEAN
@@ -75,6 +99,16 @@ def image_transform(model_name, model=None):
     return transform
 
 def feature_extraction(model_name, model, image):
+    """feature extraction. This function can be extended to different models.
+
+    Args:
+        model_name (str): specify model name.
+        model (model): model
+        image (torch.Tensor): image input
+
+    Returns:
+        x (list): a list of features of multiple candidate layers. 
+    """
     if model_name == 'alexnet':
         x = model.forward(image)
     else:

@@ -1,14 +1,17 @@
-# -*- coding: utf-8 -*-
-# Using features from all layers.
+'''
+Author: zhouqy
+Date: 2022-06-04 11:40:49
+LastEditors: zhouqy
+LastEditTime: 2022-07-11 23:41:14
+Description:  Using features from all layers to 
+predict neural activities of different ROIs and different subjects.
+'''
 import numpy as np
 import os
 import glob
-import random
 import argparse
-import itertools
 import csv
 import time
-from tqdm import tqdm
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 import torch
@@ -21,7 +24,19 @@ import pickle
 from earlystopping import EarlyStopping
 import pandas as pd
 
+
+
 def vectorized_correlation(x,y):
+    """Calculate the PCC.
+
+    Args:
+        x (np.array of shape (sample_num, voxel_num)): True responses.
+        y (np.array of shape (sample_num, voxel_num)): Predicted reponses.
+
+    Returns:
+        corr_vec (np.array of shape (voxel_num)): 
+            PCC between the true and predicted responses of different voxels.
+    """
     dim = 0
 
     centered_x = x - x.mean(axis=dim, keepdims=True)
@@ -35,19 +50,30 @@ def vectorized_correlation(x,y):
     y_std = y.std(axis=dim, keepdims=True)+1e-8
 
     corr = bessel_corrected_covariance / (x_std * y_std)
-
-    return corr.ravel()
+    corr_vec = corr.ravel()
+    return corr_vec
 
 
 def weights_init(m):
+    '''
+    Initialize weights of linear layer.
+    '''
     classname = m.__class__.__name__
     if classname.find('Linear') != -1:
         nn.init.xavier_normal_(m.weight.data)
         nn.init.constant_(m.bias.data, 0.0)
 
-# Create FC network with layer weights
+
 class FC_reg(nn.Module):
+    
     def __init__(self, o_dim, i_dim, dim_list):
+        """Create FC network with layer weights
+
+        Args:
+            o_dim (int): the number of voxels.
+            i_dim (int): feature dimension, equal to sum(dim_list)
+            dim_list (list): a list with dimensions of features of all layers.
+        """
         super(FC_reg, self).__init__()
         self.dim_list = dim_list
         self.model = nn.Linear(i_dim, o_dim)
@@ -65,16 +91,18 @@ class FC_reg(nn.Module):
         out = self.model(x_fil)
         return out
 
-def load_dict(filename_):
-    with open(filename_, 'rb') as f:
-        u = pickle._Unpickler(f)
-        u.encoding = 'latin1'
-        ret_di = u.load()
-    return ret_di
-
 class Ds_loader(Dataset):
     def __init__(self, train_activ, train_fmri, test_activ, test_fmri, 
                         split='train'):
+        """load dataset (feature, fmri)
+
+        Args:
+            train_activ (np.array): image feature array of the training set
+            train_fmri (np.array): fmri array of the training set
+            test_activ (np.array): image feature array of the test set
+            test_fmri (np.array): fmri array of the test set
+            split (str, optional): load training set or test set. Defaults to 'train'.
+        """
         if split == 'train':
             self.activ = train_activ
             self.fmri = train_fmri
@@ -82,6 +110,7 @@ class Ds_loader(Dataset):
             self.activ = test_activ
             self.fmri = test_fmri
         print(self.activ.shape, self.fmri.shape)
+
     def __getitem__(self, idx):
         activ = self.activ[idx]
         fmri = self.fmri[idx]
@@ -95,13 +124,11 @@ def get_activations(activations_dir):
     """This function loads neural network features/activations 
     into a numpy array.
 
-    Parameters
-    ----------
+    Args:
     activations_dir : str
         Path of Neural Network features
 
-    Returns
-    -------
+    Returns:
     train_activations : np.array
         matrix of dimensions # train_sample_number x # dimension
         containing activations of train videos
@@ -133,19 +160,33 @@ def get_activations(activations_dir):
     print(dim_list)
     return train_activations, test_activations, dim_list
 
+
+def load_dict(filename_):
+    """load .pkl data
+
+    Args:
+        filename_ (str): the path of .pkl data file.
+
+    Returns:
+        ret_di (dict): data
+    """
+    with open(filename_, 'rb') as f:
+        u = pickle._Unpickler(f)
+        u.encoding = 'latin1'
+        ret_di = u.load()
+    return ret_di
+
 def get_fmri(fmri_dir, ROI, test_idx):
     """This function loads fMRI data 
     into a numpy array for to a given ROI.
 
-    Parameters
-    ----------
+    Args:
     fmri_dir : str
         path to fMRI data.
     ROI : str
         name of ROI.
 
-    Returns
-    -------
+    Returns:
     ROI_data_train: np.array
     matrix of dimensions #train_vids x #voxels
     containing fMRI responses to train videos of a given ROI
@@ -174,8 +215,7 @@ def predict_fmri_fc2(train_activations, test_activations,
     then returns the predicted fmri_pred_test using the fitted weights and
     test_activations.
 
-    Parameters
-    ----------
+    Args:
     train_activations : np.array
         matrix of dimensions #train_vids x #pca_components
         containing activations of train videos.
@@ -195,10 +235,9 @@ def predict_fmri_fc2(train_activations, test_activations,
     dim_list: list, a list of feature dimensions of all layers
     layer_coe: float, regularization coefficient of layer weight
     model_dir: str, directory to save model
-    metric: str, early-stopping metric
+    metric: str, metric for early-stopping
     patience/delta: int/float, early-stopping patience, delta
-    Returns
-    -------
+    Returns:
     model, early-stopping epoch number
     """
     data_loader = {split: DataLoader(
@@ -267,16 +306,24 @@ def predict_fmri_fc2(train_activations, test_activations,
     summary.close()
     return reg, early_stopping.epoch
 
-def write_csv(data, rois, csv_path):
-    METRIC_FIELD_NAMES = rois
+def write_csv(data, header, csv_path):
+    """Write results into .csv file.
+
+    Args:
+        data (dict): Store multiple rows of data in the form of a 
+                    dictionary that needs to be written to a csv
+        header (list): header
+        csv_path (str): Save to this file.
+    """
+
     if not os.path.isfile(csv_path):
         with open(csv_path, "w") as csv_file:
             writer = csv.DictWriter(
-                csv_file, fieldnames=METRIC_FIELD_NAMES)
+                csv_file, fieldnames=header)
             writer.writeheader()
     with open(csv_path, "a") as csv_file:
         writer = csv.DictWriter(
-            csv_file, fieldnames=METRIC_FIELD_NAMES)
+            csv_file, fieldnames=header)
         writer.writerow(data)
 
 
@@ -286,7 +333,7 @@ def main():
     parser.add_argument('-rp','--root_path', help='root path', type=str)
     parser.add_argument('-rd','--result_dir', help='saves predicted fMRI activity',
                         default = 'results', type=str)
-    parser.add_argument('-ad','--activation_dir',help='directory containing DNN activations',
+    parser.add_argument('-ad','--activation_dir',help='directory containing DNN features',
                         default = 'feature_zoo', type=str)
     parser.add_argument('-model','--model',help='model name under which predicted fMRI activity will be saved', 
                         default = 'alexnet', type=str)
@@ -296,11 +343,11 @@ def main():
     parser.add_argument('-b', '--batch_size',help='batch size of dnn training', default = 16, type=int)
     parser.add_argument('-e', '--epochs',help='epochs of dnn training', default = 1, type=int)
     parser.add_argument('-cp', '--csv_path',help='path of csv file', default = 'summary_', type=str)
-    parser.add_argument('-fn', '--fold_num',help=' kfold cross validation', default = 10, type=int)
-    parser.add_argument('-wc', '--w_coe',help=' coe of weight reg', default = 0, type=float)
-    parser.add_argument('-lay', '--layer_coe',help=' coe of layer sparseness reg', default = 0, type=float)
-    parser.add_argument('-sub', '--sub_num',help=' subject number', default = 1, type=int)
-    parser.add_argument('-roi', '--roi',help=' roi list', nargs='+')
+    parser.add_argument('-fn', '--fold_num',help='kfold cross validation', default = 10, type=int)
+    parser.add_argument('-wc', '--w_coe',help='coe of weight regularization', default = 0, type=float)
+    parser.add_argument('-lay', '--layer_coe',help='coe of layer sparseness regularization', default = 0, type=float)
+    parser.add_argument('-sub', '--sub_num',help='subject number', default = 1, type=int)
+    parser.add_argument('-roi', '--roi',help='roi name', type=str)
     parser.add_argument('-gpu', '--gpu_id', help='gpu id', default='7', type=str)
     parser.add_argument('-dim_rd','--dim_rd', help='feature dimension reduction', default = 'not_rd', type=str)
     parser.add_argument('-ti_st', '--time_stamp', help='only need in mode test', default=' ', type=str)
@@ -321,107 +368,65 @@ def main():
     layer_coe = args['layer_coe']
     hyper_suffix = '_'.join([str(args['w_coe']), str(args['layer_coe'])])
     track = 'mini_track'
-    ROIs = args['roi']
-
+    ROI = args['roi']
+    mode = args['mode']
+    batch_size = args['batch_size']
+    epochs = args['epochs']
     num_subs = args['sub_num']
+
+    activation_dir = os.path.join(args['root_path'], 
+                            args['activation_dir'], args['model'], args['dim_rd'])
+    fmri_dir = os.path.join(args['root_path'], args['fmri_dir'], track)
+    root_path = os.path.join(args['root_path'], 
+            args['result_dir'], args['model'], args['dim_rd'], 'multilayer', track)
+    csv_save_path = os.path.join(root_path, args['csv_path']+(ROI)+'.csv')
+
+
     time_stamp = time.strftime("%m%d%H%M%S", time.localtime())
     subs=[]
     for s in range(num_subs):
       subs.append('sub'+str(s+1).zfill(2))
     layer_contribution = []
-    root_path = os.path.join(args['root_path'], 
-            args['result_dir'], args['model'], args['dim_rd'], 'multilayer', track)
-    csv_save_path = os.path.join(root_path, args['csv_path']+('_'.join(ROIs))+'.csv')
+    # load features, same for different subjects.
+    train_activations, test_activations, dim_list = get_activations(activation_dir)
+    test_idx = np.load(os.path.join(args['root_path'], 'test_idx.npy'))
+    # fit model for each subject.
     for sub in subs:
         print(sub)
-        score_all_roi = {roi:0 for roi in ROIs}
-        for ROI in ROIs:
-            print("ROI is : ", ROI)
-            mode = args['mode']
+        score_final = {ROI:0}
+        print("ROI is : ", ROI)
 
-            batch_size = args['batch_size']
-            epochs = args['epochs']
+        sub_fmri_dir = os.path.join(fmri_dir, sub)
+        results_dir = os.path.join(root_path, sub)
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
 
-            activation_dir = os.path.join(args['root_path'], 
-                                    args['activation_dir'], args['model'], args['dim_rd'])
-            fmri_dir = os.path.join(args['root_path'], args['fmri_dir'], track)
-
-            sub_fmri_dir = os.path.join(fmri_dir, sub)
-            results_dir = os.path.join(root_path, sub)
-            if not os.path.exists(results_dir):
-                os.makedirs(results_dir)
-
-            train_activations, test_activations, dim_list = get_activations(activation_dir)
-            test_idx = np.load(os.path.join(args['root_path'], 'test_idx.npy'))
-            train_fmri, test_fmri = get_fmri(sub_fmri_dir, ROI, test_idx)
-            num_voxels = test_fmri.shape[-1]
-            print("number of voxels is ", num_voxels)
-            if mode == 'hyper_tune':
-                fold_num = args['fold_num']
-                kf = KFold(n_splits=fold_num, shuffle=False)
-                score_avg = 0.
-                for i, (train_idx, val_idx) in enumerate(kf.split(train_activations)):
-                    log_dir = os.path.join(results_dir, ROI, 'logs', 
-                                            '_'.join([mode, hyper_suffix, time_stamp]), str(i+1))
-                    model_dir = os.path.join(results_dir, ROI, 'models', 
-                                            '_'.join([mode, hyper_suffix, time_stamp]), str(i+1))
-                    if not os.path.exists(model_dir):
-                        os.makedirs(model_dir)
-                    summary = SummaryWriter(logdir=log_dir)
-                    print('Cross validation, Fold {}'.format(i+1))
-                    
-                    train_activ_fold = train_activations[train_idx]
-                    val_activ_fold = train_activations[val_idx]
-                    train_fmri_fold = train_fmri[train_idx]
-                    val_fmri_fold = train_fmri[val_idx]
-
-                    reg_model, epoch_saved = predict_fmri_fc2(train_activ_fold, val_activ_fold,
-                                                train_fmri_fold, val_fmri_fold,
-                                                epochs=epochs, batch_size=batch_size, 
-                                                summary=summary, 
-                                                w_coe=w_coe, dim_list=dim_list,
-                                                layer_coe=layer_coe,
-                                                model_dir=model_dir,
-                                                metric=args['metric'], patience=args['patience'],
-                                                delta=args['delta'])
-
-                    pred_fmri = reg_model.forward(
-                        torch.from_numpy(val_activ_fold).float().cuda()).detach().cpu().numpy()
-                    score = vectorized_correlation(val_fmri_fold, pred_fmri)
-                    print("Mean correlation for ROI : ",ROI, "in ",sub, " is :", round(score.mean(), 3))
-                    score_avg += score.mean()
-                    print("----------------------------------------------------------------------------")
-
-                print("Cross-validation mean correlation for ROI: ",ROI, "in ",sub, " is :", round(score_avg/fold_num, 3))
-                score_all_roi[ROI] = score_avg/fold_num
-
-            elif mode == 'train':
-                if w_coe == 0 and layer_coe == 0:
-                    data = pd.read_csv(csv_save_path)
-                    # # # # average on all subjects # # # # # # # # # # #
-                    target_data = data[(data['mode']=='hyper_tune') & (
-                                        data['fold_num'] == 2) & (
-                                        data['sub'] == 1)]
-                    # # # # # # # # # # # # # # # # # # # # # # # # # # # 
-                    # # # # # on the first subject# # # # # # # # # # # # 
-                    best_score = target_data[ROI].max()
-                    hyper_suffix = target_data[target_data[ROI]==best_score].iloc[0]['hyper_suffix']
-                    # # # # # # # # # # # # # # # # # # # # # # # # # # # 
-                    w_coe = float(hyper_suffix.split('_')[0])
-                    layer_coe = float(hyper_suffix.split('_')[1])
-                    print('Using results of hyper-param Grid-Search, w_coe=%.2f, layer_coe=%.2f'%(
-                            w_coe, layer_coe))
-
+        # load the fmri data of this subject.
+        train_fmri, test_fmri = get_fmri(sub_fmri_dir, ROI, test_idx)
+        num_voxels = test_fmri.shape[-1]
+        print("The number of voxels=", num_voxels)
+        # different modes.
+        if mode == 'hyper_tune':    # This mode is for hyper-parameter tuning.
+            fold_num = args['fold_num'] # evaluating by k-fold cross-validation
+            kf = KFold(n_splits=fold_num, shuffle=False)
+            score_avg = 0.
+            for i, (train_idx, val_idx) in enumerate(kf.split(train_activations)):
                 log_dir = os.path.join(results_dir, ROI, 'logs', 
-                                        '_'.join([mode, hyper_suffix, time_stamp]))
+                                        '_'.join([mode, hyper_suffix, time_stamp]), str(i+1))
                 model_dir = os.path.join(results_dir, ROI, 'models', 
-                                        '_'.join([mode, hyper_suffix, time_stamp]))
+                                        '_'.join([mode, hyper_suffix, time_stamp]), str(i+1))
                 if not os.path.exists(model_dir):
                     os.makedirs(model_dir)
                 summary = SummaryWriter(logdir=log_dir)
+                print('Cross validation, Fold {}'.format(i+1))
+                
+                train_activ_fold = train_activations[train_idx]
+                val_activ_fold = train_activations[val_idx]
+                train_fmri_fold = train_fmri[train_idx]
+                val_fmri_fold = train_fmri[val_idx]
 
-                reg_model, epoch_saved = predict_fmri_fc2(train_activations, test_activations,
-                                            train_fmri, test_fmri,
+                reg_model, epoch_saved = predict_fmri_fc2(train_activ_fold, val_activ_fold,
+                                            train_fmri_fold, val_fmri_fold,
                                             epochs=epochs, batch_size=batch_size, 
                                             summary=summary, 
                                             w_coe=w_coe, dim_list=dim_list,
@@ -431,56 +436,106 @@ def main():
                                             delta=args['delta'])
 
                 pred_fmri = reg_model.forward(
-                    torch.from_numpy(test_activations).float().cuda()).detach().cpu().numpy()
-                
-                torch.save(reg_model.state_dict(), os.path.join(model_dir, 'model.pth'))
-                score = vectorized_correlation(test_fmri, pred_fmri)
-                print("Correlation for ROI : ",ROI, "in ",sub, " is :", round(score.mean(), 3))
-                score_all_roi[ROI] = score.mean()
+                    torch.from_numpy(val_activ_fold).float().cuda()).detach().cpu().numpy()
+                score = vectorized_correlation(val_fmri_fold, pred_fmri)
+                print("Mean correlation for ROI %s in %s is: %.3f"%(ROI, sub, score.mean()))
+                score_avg += score.mean()
+                print("----------------------------------------------------------------------------")
+            print('w_coe=%s, layer_coe=%s'%(str(args['w_coe']), str(args['layer_coe'])))
+            print("Cross-validation mean correlation for ROI %s in %s is: %.3f"%(
+                        ROI, sub, score_avg/fold_num))
+            score_final[ROI] = score_avg/fold_num
 
-            elif mode == 'test':
-                epoch_saved=-1
-                model_dir = os.path.join(results_dir, ROI, 'models', 
-                                        '_'.join([mode, hyper_suffix, args['time_stamp']]))
-                fea_dim = sum(dim_list)
-                reg_model = FC_reg(num_voxels, fea_dim, dim_list)
-                reg_model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pth')))
-                reg_model.cuda()
-                reg_model.eval()
+        elif mode == 'train':
+            if w_coe == 0 and layer_coe == 0:
+                data = pd.read_csv(csv_save_path)
+                # # # # # find the best hyper-params on the first subject # # # # # # # # # # # # 
+                target_data = data[(data['mode']=='hyper_tune') & (
+                                    data['fold_num'] == 2) & (
+                                    data['sub'] == 1)]
+                best_score = target_data[ROI].max()
+                hyper_suffix = target_data[target_data[ROI]==best_score].iloc[0]['hyper_suffix']
+                # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+                w_coe = float(hyper_suffix.split('_')[0])
+                layer_coe = float(hyper_suffix.split('_')[1])
+                print('Using results of hyper-param Grid-Search, w_coe=%.2f, layer_coe=%.2f'%(
+                        w_coe, layer_coe))
+
+            log_dir = os.path.join(results_dir, ROI, 'logs', 
+                                    '_'.join([mode, hyper_suffix, time_stamp]))
+            model_dir = os.path.join(results_dir, ROI, 'models', 
+                                    '_'.join([mode, hyper_suffix, time_stamp]))
+            if not os.path.exists(model_dir):
+                os.makedirs(model_dir)
+            summary = SummaryWriter(logdir=log_dir)
+
+            reg_model, epoch_saved = predict_fmri_fc2(train_activations, test_activations,
+                                        train_fmri, test_fmri,
+                                        epochs=epochs, batch_size=batch_size, 
+                                        summary=summary, 
+                                        w_coe=w_coe, dim_list=dim_list,
+                                        layer_coe=layer_coe,
+                                        model_dir=model_dir,
+                                        metric=args['metric'], patience=args['patience'],
+                                        delta=args['delta'])
+
+            pred_fmri = reg_model.forward(
+                torch.from_numpy(test_activations).float().cuda()).detach().cpu().numpy()
+            
+            # save model for test convienence.
+            torch.save(reg_model.state_dict(), os.path.join(model_dir, 'model.pth'))
+            score = vectorized_correlation(test_fmri, pred_fmri)
+            print("Correlation for ROI : ",ROI, "in ",sub, " is :", round(score.mean(), 3))
+            score_final[ROI] = score.mean()
+
+        elif mode == 'test':
+            # load model weights and test
+            epoch_saved=-1
+            model_dir = os.path.join(results_dir, ROI, 'models', 
+                                    '_'.join([mode, hyper_suffix, args['time_stamp']]))
+            fea_dim = sum(dim_list)
+            reg_model = FC_reg(num_voxels, fea_dim, dim_list)
+            reg_model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pth')))
+            reg_model.cuda()
+            reg_model.eval()
+            pred_fmri = reg_model.forward(
+                torch.from_numpy(test_activations).float().cuda()).detach().cpu().numpy()
+            
+            score = vectorized_correlation(test_fmri, pred_fmri)
+            print("Correlation for ROI : ",ROI, "in ",sub, " is :", round(score.mean(), 3))
+            score_final[ROI] = score.mean()
+
+        if mode == 'train' or mode == 'test':
+            # calculate the contribution of different layers.
+            score_lay_cont_ls = []
+            for layer in range(len(dim_list)):
+                test_activations_copy = test_activations.copy()
+                if layer == 0:
+                    test_activations_copy[:, dim_list[layer]:] = 0
+                else:
+                    test_activations_copy[:, :sum(dim_list[:layer])] = 0
+                    test_activations_copy[:, (sum(dim_list[:layer])+dim_list[layer]):] = 0
+                
                 pred_fmri = reg_model.forward(
-                    torch.from_numpy(test_activations).float().cuda()).detach().cpu().numpy()
-                
-                score = vectorized_correlation(test_fmri, pred_fmri)
-                print("Correlation for ROI : ",ROI, "in ",sub, " is :", round(score.mean(), 3))
-                score_all_roi[ROI] = score.mean()
+                    torch.from_numpy(test_activations_copy).float().cuda()).detach().cpu().numpy()
+                score_lay_cont = vectorized_correlation(test_fmri, pred_fmri)
+                score_lay_cont_ls.append(score_lay_cont)
+            
+            tmp_sum = sum([score_lay_cont.mean() for score_lay_cont in score_lay_cont_ls])
+            cont_mean_sum = [score_lay_cont.mean()/tmp_sum for score_lay_cont in score_lay_cont_ls]
+            layer_contribution.append(cont_mean_sum)
 
-            if mode == 'train' or mode == 'test':
-                score_lay_cont_ls = []
-                for layer in range(len(dim_list)):
-                    test_activations_copy = test_activations.copy()
-                    if layer == 0:
-                        test_activations_copy[:, dim_list[layer]:] = 0
-                    else:
-                        test_activations_copy[:, :sum(dim_list[:layer])] = 0
-                        test_activations_copy[:, (sum(dim_list[:layer])+dim_list[layer]):] = 0
-                    
-                    pred_fmri = reg_model.forward(
-                        torch.from_numpy(test_activations_copy).float().cuda()).detach().cpu().numpy()
-                    score_lay_cont = vectorized_correlation(test_fmri, pred_fmri)
-                    score_lay_cont_ls.append(score_lay_cont)
-                tmp_sum = sum([score_lay_cont.mean() for score_lay_cont in score_lay_cont_ls])
-                cont_mean_sum = [score_lay_cont.mean()/tmp_sum for score_lay_cont in score_lay_cont_ls]
-                layer_contribution.append(cont_mean_sum)
-
-        score_all_roi['mode'] = mode
-        score_all_roi['fold_num'] = args['fold_num']
-        score_all_roi['sub'] = int(sub[3:])
-        score_all_roi['hyper_suffix'] = hyper_suffix
-        score_all_roi['epoch_saved'] = epoch_saved
-        write_csv(score_all_roi, 
-            ['mode', 'fold_num', 'sub', 'hyper_suffix', 'epoch_saved']+ROIs, 
+        score_final['mode'] = mode
+        score_final['fold_num'] = args['fold_num']
+        score_final['sub'] = int(sub[3:])
+        score_final['hyper_suffix'] = hyper_suffix
+        score_final['epoch_saved'] = epoch_saved
+        write_csv(score_final, 
+            ['mode', 'fold_num', 'sub', 'hyper_suffix', 'epoch_saved', ROI], 
             csv_save_path)
     if mode == 'train' or mode == 'test':
+        # save the layer contribution as np.array of shape 
+        # (the number of subjects, the number of candidate layers.)
         np.save(os.path.join(root_path, 'layer_contribution'+'_'+ROI), np.array(layer_contribution))
 if __name__ == "__main__":
     main()

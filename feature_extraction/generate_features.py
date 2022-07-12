@@ -1,29 +1,22 @@
-
-###
-# This file will:
-# 1. Generate and save features in a given folder
-###
-import timm
-from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-from timm.data import resolve_data_config
-from timm.data.transforms_factory import create_transform
+'''
+Author: zhouqy
+Date: 2022-06-04 11:40:49
+LastEditors: zhouqy
+LastEditTime: 2022-07-11 23:42:55
+Description: Generate and save features in a given folder
+'''
 
 import glob
 import numpy as np
-import urllib
 import torch
 import cv2
 import argparse
-import time
 import random
 from tqdm import tqdm
-from torchvision import transforms as trn
 import os
 
-from PIL import Image
 from sklearn.preprocessing import StandardScaler
-from torch.autograd import Variable as V
-from sklearn.decomposition import PCA, IncrementalPCA
+from sklearn.decomposition import PCA
 from sklearn.random_projection import SparseRandomProjection
 from utils import *
 seed = 42
@@ -37,6 +30,16 @@ random.seed(seed)
 
 
 def get_video_from_mp4(file, sampling_rate):
+    """Extract frames from the video and save.
+
+    Args:
+        file (str): file path of the video.
+        sampling_rate (int): Specify a frame to be extracted every sampling_rate frames
+
+    Returns:
+        vid (array of shape (num_frames, H, W, 3)): video saved as array.
+        num_frames (int): how many frames contained in vid.
+    """
     cap = cv2.VideoCapture(file)
     frameCount = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frameWidth = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -53,22 +56,37 @@ def get_video_from_mp4(file, sampling_rate):
             buf[int((fc - 1) / sampling_rate)] = frame
 
     cap.release()
-    return np.expand_dims(buf, axis=0),int(frameCount / sampling_rate)
+    vid = np.expand_dims(buf, axis=0)
+    num_frames = int(frameCount / sampling_rate)
+    return vid, num_frames
 
 
 def get_activations_and_save(model_name, video_list, save_dir, dim_rd, 
                     test_idx, pca_ratio, sampling_rate = 4, token='cls'):
+    """get activations of videos and save.
 
+    Args:
+        model_name (str): Specify which model's features to use.
+        video_list (list): list of video file paths.
+        save_dir (str): where to save these features.
+        dim_rd (str): dimension reduction strategy, 'not_rd' means no reduction,
+                    'pca' for Principal component analysis and 'srp' for sparse random projection.
+        test_idx (array): use indices to specify test samples.
+        pca_ratio (float): [0,1] to specify what proportion of the explained variance is kept.
+        sampling_rate (int, optional): Specify a frame to be extracted every sampling_rate frames. 
+                                        Defaults to 4.
+        token (str, optional): only for models with a distillation token, like DeiT. 
+                                Defaults to 'cls'.
+    """
 
     model = load_model(model_name)
-    transform = image_transform(model_name, model=model)
+    transform = image_transform(model_name)
 
     fea_tot = []
     layer_3d = 0
     j = 0
     for video_file in tqdm(video_list):
         vid,num_frames = get_video_from_mp4(video_file, sampling_rate)
-        video_file_name = os.path.split(video_file)[-1].split(".")[0]
         activations = []
         for frame in range(num_frames):
             img = vid[0, frame, :, :, :]
@@ -79,7 +97,6 @@ def get_activations_and_save(model_name, video_list, save_dir, dim_rd,
                 x = feature_extraction(model_name, model, input_img)
             for i,feat in enumerate(x):
                 if frame==0:
-                    # print(feat.size())
                     feat_tmp = feat.data.cpu().numpy()
                     if j == 0:
                         if len(feat_tmp.shape) == 2 and layer_3d == 0:
@@ -132,21 +149,26 @@ def main():
             default = 'alexnet', type=str)
     parser.add_argument('-ad','--activation_dir',help='directory containing DNN activations',
                         default = 'feature_zoo', type=str)
-    parser.add_argument('-dim_rd','--dim_rd', help='feature dimension reduction', 
+    parser.add_argument('-dim_rd','--dim_rd', help='feature dimension reduction method', 
             default = 'srp', type=str)
     parser.add_argument('-pca_ratio','--pca_ratio', help='pca component ratio', 
             default = 0.98, type=float)
-    parser.add_argument('-srate','--sample_rate', help='sample rate', default = 4, type=int)
-    parser.add_argument('-token', '--token', help='token category', default='cls', type=str)
-    parser.add_argument('-gpu', '--gpu_id', help='gpu id', default='7', type=str)
+    parser.add_argument('-srate','--sample_rate', 
+            help='Specify a frame to be extracted every sampling_rate frames', default = 4, type=int)
+    parser.add_argument('-token', '--token', 
+            help="token category, it can be dist or cls for model DeiT.", 
+            default='cls', type=str)
+    parser.add_argument('-gpu', '--gpu_id', help='use which GPU to run the program.', default='7', type=str)
     args = vars(parser.parse_args())
 
 
     os.environ['CUDA_VISIBLE_DEVICES']=args['gpu_id']
+    # create folder to save the features.
     save_dir = os.path.join(args['root_path'], args['activation_dir'], args['feature_name'])
     if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
+    # collect video list.
     video_dir = os.path.join(args['root_path'], args['video_data_dir'])
     video_list = glob.glob(os.path.join(video_dir, '*.mp4'))
     video_list.sort()
@@ -156,8 +178,9 @@ def main():
     if os.path.exists(os.path.join(args['root_path'], 'test_idx')):
         test_idx = np.load(os.path.join(args['root_path'], 'test_idx.npy'))
     else:
+        # fix the random seed if you want to keep a same split.
         np.random.seed(400)
-        test_idx = np.random.permutation(np.arange(1000))[:100]
+        test_idx = np.random.permutation(np.arange(1000))[:100] # 9:1 train/test split
         np.save(os.path.join(args['root_path'], 'test_idx'), test_idx)
 
     print("-------------Saving activations ----------------------------")

@@ -1,3 +1,11 @@
+'''
+Author: zhouqy
+Date: 2022-06-04 11:40:49
+LastEditors: zhouqy
+LastEditTime: 2022-07-11 23:41:02
+Description:  An efficient module of Early-stopping
+'''
+
 import numpy as np
 import torch
 

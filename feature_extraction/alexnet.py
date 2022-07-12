@@ -1,3 +1,11 @@
+'''
+Author: zhouqy
+Date: 2022-06-04 11:40:49
+LastEditors: zhouqy
+LastEditTime: 2022-07-11 23:42:42
+Description:  AlexNet model architecture
+'''
+
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 
@@ -11,7 +19,11 @@ model_urls = {
 
 
 class AlexNet(nn.Module):
+    """AlexNet model class
 
+    Args:
+        num_classes (int): dimension of the last FC layer, also the number of classes.
+    """
     def __init__(self, num_classes=1000):
         super(AlexNet, self).__init__()
         self.conv1 = nn.Sequential(
@@ -52,6 +64,17 @@ class AlexNet(nn.Module):
             )
 
     def forward(self, x):
+        """Extract features.
+
+        Args:
+            x (array of shape (batch_size, C, H, W)): Input image
+
+        Returns:
+            out1, out2, out3, out4, out5 (array of shape (batch_size, C, H, W)): 
+                features of convolutional layers
+            out6, out7, out8 (array of shape (batch_size, D)): 
+                features of fully-connected layers
+        """
         out1 = self.conv1(x)
         out2 = self.conv2(out1)
         out3 = self.conv3(out2)
